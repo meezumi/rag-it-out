@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: rag_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./documents:/app/documents
+      - .:/app  # Mount the current directory to allow for code changes without rebuilding
+    depends_on:
+      - chroma
+    environment:
+      - CHROMA_HOST=chroma
+
+  chroma:
+    image: chromadb/chroma
+    container_name: chroma_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./vector_store:/chroma/chroma # Persist ChromaDB data
