@@ -15,13 +15,12 @@ import torch
 # --- CONFIGURATION ---
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost")
 DOCUMENTS_DIR = "./documents"
-COLLECTION_NAME = "local_scholar_collection"  # Name for our collection in ChromaDB
+COLLECTION_NAME = "local_scholar_collection"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 LLM_MODEL_NAME = "google/flan-t5-base"
 
 
 # --- CLIENT SETUP ---
-# Setup the ChromaDB client to connect to the running server
 chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=8000)
 
 
@@ -60,12 +59,18 @@ def process_documents():
         return
 
     with st.spinner("Processing documents... This may take a moment."):
-        # Load documents
+        status_placeholder = st.empty()
+
+        status_placeholder.info("1/4 - Loading PDF documents...")
         loader = PyPDFDirectoryLoader(DOCUMENTS_DIR)
         documents = loader.load()
         if not documents:
             st.warning("Could not load any documents from the PDF files.")
             return
+
+        status_placeholder.info(
+            f"2/4 - Splitting {len(documents)} document(s) into chunks..."
+        )
 
         # Split documents into chunks
         text_splitter = RecursiveCharacterTextSplitter(
@@ -126,33 +131,67 @@ st.write(
     f"Upload research papers to the `{DOCUMENTS_DIR}` folder and ask questions about their content."
 )
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 with st.sidebar:
     st.header("Controls")
     if st.button("Process Documents"):
         process_documents()
 
-st.header("Ask a Question")
+    if st.button("Clear Database"):
+        with st.spinner("Clearing vector database..."):
+            try:
+                chroma_client.delete_collection(name=COLLECTION_NAME)
+                # --- ADDED: Clear conversation history when clearing DB ---
+                st.session_state.messages = []
+                st.success("Database and conversation history cleared successfully!")
+            except Exception as e:
+                st.error(f"An error occurred while clearing the database: {e}")
 
-# Initialize the QA chain
+st.header("Conversation")
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+
+# To start the QA chain
 try:
     qa_chain = setup_qa_chain()
-    query = st.text_input("Enter your question about the documents:")
 
-    if query:
-        with st.spinner("Searching for answers..."):
-            try:
-                result = qa_chain({"query": query})
-                st.subheader("Answer:")
-                st.write(result["result"])
+    if prompt := st.chat_input("Ask a question about your documents"):
+        # Add user message to history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-                with st.expander("Show Source Documents"):
-                    for doc in result["source_documents"]:
-                        st.write(
-                            f"**Source:** {os.path.basename(doc.metadata.get('source', 'Unknown'))}"
-                        )
-                        st.write(f"**Content:** {doc.page_content[:500]}...")
-            except Exception as e:
-                st.error(f"An error occurred during query execution: {e}")
+        # Get assistant response
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            with st.spinner("Searching for answers..."):
+                try:
+                    result = qa_chain.invoke(
+                        {"query": prompt}
+                    )  # Use invoke for the latest LangChain
+                    answer = result["result"]
+
+                    # --- ADDED: Expander for sources ---
+                    with st.expander("Show Source Documents"):
+                        for doc in result["source_documents"]:
+                            st.write(
+                                f"**Source:** {os.path.basename(doc.metadata.get('source', 'Unknown'))}"
+                            )
+                            st.write(f"**Content:** {doc.page_content[:500]}...")
+
+                    message_placeholder.markdown(answer)
+                    # Add assistant response to history
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": answer}
+                    )
+
+                except Exception as e:
+                    st.error(f"An error occurred during query execution: {e}")
+
 except Exception as e:
     st.error(
         f"Failed to initialize the QA chain. Have you processed the documents yet? Error: {e}"
