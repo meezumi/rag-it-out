@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import chromadb
 
-from langchain_unstructured import UnstructuredLoader as UnstructuredDirectoryLoader
+from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -16,7 +16,6 @@ from transformers import (
     BitsAndBytesConfig,
 )
 import torch
-
 
 # --- CONFIGURATION ---
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost")
@@ -34,12 +33,11 @@ AVAILABLE_LLMS = {
     "Flan-T5 Large (Better Quality)": "google/flan-t5-large",
 }
 
-
 # --- CLIENT SETUP ---
 chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=8000)
 
-
 # --- HELPER FUNCTIONS ---
+
 @st.cache_resource
 def load_llm_pipeline(model_name):
     st.info(f"Loading LLM: {model_name}...")
@@ -48,11 +46,9 @@ def load_llm_pipeline(model_name):
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(
-        model_name,
-        quantization_config=quantization_config,
-        device_map="auto",  # Automatically use GPU if available
+        model_name, quantization_config=quantization_config, device_map="auto"
     )
-    
+
     pipe = pipeline(
         "text2text-generation",
         model=model,
@@ -81,9 +77,8 @@ def process_documents(embedding_model_name):
     with st.spinner("Processing documents... This may take a moment."):
         status_placeholder = st.empty()
 
-        status_placeholder.info("1/4 - Loading documents with Unstructured.io...")
-        # --- Using UnstructuredDirectoryLoader for better PDF parsing ---
-        loader = UnstructuredDirectoryLoader(DOCUMENTS_DIR, silent_errors=True)
+        status_placeholder.info("1/4 - Loading PDF documents...")
+        loader = PyPDFDirectoryLoader(DOCUMENTS_DIR, silent_errors=True)
         documents = loader.load()
 
         if not documents:
@@ -137,15 +132,15 @@ def setup_qa_chain(embedding_model_name, llm_model_name):
 
 
 # --- STREAMLIT UI ---
-st.set_page_config(page_title="RAG Documentor", layout="wide")
-st.title("RAG IT OUT")
-st.write(f"An advanced RAG application to chat with your documents locally.")
+st.set_page_config(page_title="Local Scholar RAG", layout="wide")
+st.title("📚 Local Scholar: Research Paper Q&A")
+st.write("An advanced RAG application to chat with your documents locally.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 with st.sidebar:
-    st.header("Configuration")
+    st.header("⚙️ Configuration")
 
     st.selectbox(
         "Choose Embedding Model",
@@ -161,7 +156,6 @@ with st.sidebar:
 
     st.header("Controls")
     if st.button("Process Documents"):
-        # Need to clear the database if the embedding model changes
         st.info("Clearing old database before processing with new embedding model...")
         try:
             chroma_client.delete_collection(name=COLLECTION_NAME)
@@ -183,18 +177,14 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-
-# To start the QA chain
 try:
     qa_chain = setup_qa_chain(embedding_model_name, llm_model_name)
 
     if prompt := st.chat_input("Ask a question about your documents"):
-        # Add user message to history
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Get assistant response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             with st.spinner("Thinking..."):
@@ -202,15 +192,16 @@ try:
                 answer = result["result"]
                 with st.expander("Show Source Documents"):
                     for doc in result["source_documents"]:
-                        st.write(f"**Source:** {os.path.basename(doc.metadata.get('source', 'Unknown'))}")
+                        st.write(
+                            f"**Source:** {os.path.basename(doc.metadata.get('source', 'Unknown'))}"
+                        )
                         st.write(f"**Content:** {doc.page_content[:500]}...")
                 message_placeholder.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-
-except Exception as e:
-    st.error(f"An error occurred. Did you process the documents with the selected embedding model? Error: {e}")
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": answer}
+                )
 
 except Exception as e:
     st.error(
-        f"Failed to initialize the QA chain. Have you processed the documents yet? Error: {e}"
+        f"An error occurred. Did you process the documents with the selected embedding model? Error: {e}"
     )
