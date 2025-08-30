@@ -8,4 +8,4 @@ chromadb-client
 transformers
 accelerate
 bitsandbytes
-unstructured[pdf,local-inference]
+langchain-unstructured[local]
