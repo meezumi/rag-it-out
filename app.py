@@ -133,7 +133,7 @@ def setup_qa_chain(embedding_model_name, llm_model_name):
 
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Local Scholar RAG", layout="wide")
-st.title("📚 Local Scholar: Research Paper Q&A")
+st.title("RAG-IT-OUT")
 st.write("An advanced RAG application to chat with your documents locally.")
 
 if "messages" not in st.session_state:
@@ -192,9 +192,11 @@ try:
                 answer = result["result"]
                 with st.expander("Show Source Documents"):
                     for doc in result["source_documents"]:
-                        st.write(
-                            f"**Source:** {os.path.basename(doc.metadata.get('source', 'Unknown'))}"
+                        source_name = os.path.basename(
+                            doc.metadata.get("source", "Unknown")
                         )
+                        page_number = doc.metadata.get("page", "N/A")
+                        st.write(f"**Source:** {source_name} (Page: {page_number})")
                         st.write(f"**Content:** {doc.page_content[:500]}...")
                 message_placeholder.markdown(answer)
                 st.session_state.messages.append(
