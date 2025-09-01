@@ -6,8 +6,11 @@ from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
+
+# from langchain.prompts import PromptTemplate
+# from langchain.chains import RetrievalQA
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
 from transformers import (
     AutoTokenizer,
@@ -111,7 +114,7 @@ def process_documents(embedding_model_name):
         st.success(f"{len(documents)} document(s) processed successfully!")
 
 
-def setup_qa_chain(embedding_model_name, llm_model_name):
+def setup_conversational_chain(embedding_model_name, llm_model_name):
     embeddings = load_embedding_model(embedding_model_name)
     db = Chroma(
         client=chroma_client,
@@ -120,19 +123,22 @@ def setup_qa_chain(embedding_model_name, llm_model_name):
     )
     retriever = db.as_retriever(search_kwargs={"k": 3})
     llm = load_llm_pipeline(llm_model_name)
-    template = "Use the following pieces of context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. \nContext: {context} \nQuestion: {question} \nHelpful Answer:"
-    QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
-    return RetrievalQA.from_chain_type(
+
+    # --- Setup memory ---
+    # The `memory_key` must match the variable name in the chain's prompt
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+    # --- Create the conversational chain ---
+    return ConversationalRetrievalChain.from_llm(
         llm=llm,
-        chain_type="stuff",
         retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": QA_CHAIN_PROMPT},
+        memory=memory,
+        # We can also add a custom prompt here if needed
     )
 
 
 # --- STREAMLIT UI ---
-st.set_page_config(page_title="Local Scholar RAG", layout="wide")
+st.set_page_config(page_title="RAG IT OUT", layout="wide")
 st.title("RAG-IT-OUT")
 st.write("An advanced RAG application to chat with your documents locally.")
 
@@ -140,7 +146,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("Configuration")
 
     st.selectbox(
         "Choose Embedding Model",
@@ -178,7 +184,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 try:
-    qa_chain = setup_qa_chain(embedding_model_name, llm_model_name)
+    qa_chain = setup_conversational_chain(embedding_model_name, llm_model_name)
 
     if prompt := st.chat_input("Ask a question about your documents"):
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -188,8 +194,13 @@ try:
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             with st.spinner("Thinking..."):
-                result = qa_chain.invoke({"query": prompt})
-                answer = result["result"]
+                result = qa_chain.invoke(
+                    {"question": prompt, "chat_history": st.session_state.chat_history}
+                )
+                answer = result["answer"]
+                
+                st.session_state.chat_history.extend([(prompt, answer)])
+                
                 with st.expander("Show Source Documents"):
                     for doc in result["source_documents"]:
                         source_name = os.path.basename(
